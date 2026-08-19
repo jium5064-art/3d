@@ -1,112 +1,120 @@
 #include "raylib.h"
 #include "raymath.h"
 #include <algorithm>
+#include <cmath>
 
-struct Player {
-    Vector3 position{0.0f, 2.0f, 0.0f};
-    Vector3 velocity{0.0f, 0.0f, 0.0f};
-    float radius = 0.5f;
+struct Body {
+    Vector3 position{0, 1, 0};
+    Vector3 velocity{0, 0, 0};
+    Vector3 halfExtents{0.5f, 0.5f, 0.5f};
     bool grounded = false;
 };
 
-static float ClampMagnitude(float value, float maxValue) {
-    return std::clamp(value, -maxValue, maxValue);
-}
+class PhysicsWorld {
+public:
+    Vector3 gravity{0, -20.0f, 0};
+    float arena = 9.5f;
+
+    void Step(Body& body, float dt) const {
+        body.velocity = Vector3Add(body.velocity, Vector3Scale(gravity, dt));
+        body.position = Vector3Add(body.position, Vector3Scale(body.velocity, dt));
+
+        if (body.position.y - body.halfExtents.y < 0) {
+            body.position.y = body.halfExtents.y;
+            if (body.velocity.y < 0) body.velocity.y = 0;
+            body.grounded = true;
+        } else {
+            body.grounded = false;
+        }
+
+        body.position.x = std::clamp(body.position.x, -arena + body.halfExtents.x, arena - body.halfExtents.x);
+        body.position.z = std::clamp(body.position.z, -arena + body.halfExtents.z, arena - body.halfExtents.z);
+    }
+};
 
 int main() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);
-    InitWindow(1280, 720, "C++ 3D Physics Engine - WASD");
+    InitWindow(1280, 720, "3D Physics Engine");
     SetTargetFPS(144);
-
-    Camera3D camera{};
-    camera.position = {7.0f, 5.0f, 7.0f};
-    camera.target = {0.0f, 1.0f, 0.0f};
-    camera.up = {0.0f, 1.0f, 0.0f};
-    camera.fovy = 60.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
-
-    Player player;
-    const float gravity = -18.0f;
-    const float moveSpeed = 7.0f;
-    const float jumpSpeed = 7.5f;
-    const float groundY = 0.0f;
-
     DisableCursor();
 
-    while (!WindowShouldClose()) {
-        const float dt = std::min(GetFrameTime(), 0.033f);
+    PhysicsWorld physics;
+    Body player;
 
-        // Camera-relative WASD movement.
-        Vector3 forward = Vector3Normalize({camera.target.x - camera.position.x, 0.0f,
-                                            camera.target.z - camera.position.z});
-        Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, camera.up));
-        Vector3 input{0.0f, 0.0f, 0.0f};
-        if (IsKeyDown(KEY_W)) input = Vector3Add(input, forward);
-        if (IsKeyDown(KEY_S)) input = Vector3Subtract(input, forward);
+    Camera3D camera{};
+    camera.up = {0, 1, 0};
+    camera.fovy = 70;
+    camera.projection = CAMERA_PERSPECTIVE;
+
+    float yaw = 225.0f * DEG2RAD;
+    float pitch = -18.0f * DEG2RAD;
+    const float speed = 7.0f;
+    const float jump = 8.0f;
+
+    while (!WindowShouldClose()) {
+        float dt = std::min(GetFrameTime(), 1.0f / 30.0f);
+
+        Vector2 mouse = GetMouseDelta();
+        yaw -= mouse.x * 0.003f;
+        pitch -= mouse.y * 0.003f;
+        pitch = std::clamp(pitch, -1.4f, 1.4f);
+
+        Vector3 forward{
+            std::cos(pitch) * std::sin(yaw),
+            std::sin(pitch),
+            std::cos(pitch) * std::cos(yaw)
+        };
+        forward = Vector3Normalize(forward);
+        Vector3 flatForward = Vector3Normalize({forward.x, 0, forward.z});
+        Vector3 right = Vector3Normalize(Vector3CrossProduct(flatForward, {0, 1, 0}));
+
+        Vector3 input{0, 0, 0};
+        if (IsKeyDown(KEY_W)) input = Vector3Add(input, flatForward);
+        if (IsKeyDown(KEY_S)) input = Vector3Subtract(input, flatForward);
         if (IsKeyDown(KEY_D)) input = Vector3Add(input, right);
         if (IsKeyDown(KEY_A)) input = Vector3Subtract(input, right);
-        if (Vector3LengthSqr(input) > 0.0f) input = Vector3Normalize(input);
+        if (Vector3LengthSqr(input) > 0) input = Vector3Normalize(input);
 
-        player.velocity.x = input.x * moveSpeed;
-        player.velocity.z = input.z * moveSpeed;
-        player.velocity.y += gravity * dt;
+        const float acceleration = 30.0f;
+        player.velocity.x += (input.x * speed - player.velocity.x) * std::min(acceleration * dt, 1.0f);
+        player.velocity.z += (input.z * speed - player.velocity.z) * std::min(acceleration * dt, 1.0f);
 
-        if (player.grounded && IsKeyPressed(KEY_SPACE)) {
-            player.velocity.y = jumpSpeed;
-            player.grounded = false;
-        }
+        if (IsKeyPressed(KEY_SPACE) && player.grounded)
+            player.velocity.y = jump;
 
-        player.position = Vector3Add(player.position, Vector3Scale(player.velocity, dt));
+        physics.Step(player, dt);
 
-        // Simple sphere-vs-ground collision.
-        if (player.position.y - player.radius < groundY) {
-            player.position.y = groundY + player.radius;
-            player.velocity.y = 0.0f;
-            player.grounded = true;
-        } else {
-            player.grounded = false;
-        }
-
-        // Keep the player inside a simple arena.
-        constexpr float arena = 9.5f;
-        player.position.x = ClampMagnitude(player.position.x, arena);
-        player.position.z = ClampMagnitude(player.position.z, arena);
-
-        // Mouse-look camera.
-        Vector2 mouse = GetMouseDelta();
-        Vector3 look = Vector3Subtract(camera.target, camera.position);
-        float yaw = -mouse.x * 0.003f;
-        float pitch = -mouse.y * 0.003f;
-        Matrix rotation = MatrixRotateXYZ({pitch, yaw, 0.0f});
-        look = Vector3Transform(look, rotation);
-        look = Vector3Normalize(look);
-        camera.position = Vector3Add(player.position, Vector3Scale(Vector3Normalize(Vector3Subtract(camera.position, player.position)), 5.5f));
-        camera.target = Vector3Add(camera.position, Vector3Scale(look, 10.0f));
+        camera.position = Vector3Add(player.position, Vector3Scale(forward, -6.0f));
+        camera.position.y += 2.0f;
+        camera.target = Vector3Add(player.position, {0, 0.6f, 0});
 
         BeginDrawing();
-        ClearBackground({18, 22, 30, 255});
+        ClearBackground({15, 18, 27, 255});
         BeginMode3D(camera);
 
-        DrawPlane({0, 0, 0}, {20, 20}, {70, 75, 85, 255});
+        DrawPlane({0, 0, 0}, {20, 20}, {65, 70, 82, 255});
         DrawGrid(20, 1.0f);
-        DrawCube({0, 1.0f, -10.0f}, {20, 2, 0.5f}, {120, 130, 150, 255});
-        DrawCube({0, 1.0f, 10.0f}, {20, 2, 0.5f}, {120, 130, 150, 255});
-        DrawCube({-10.0f, 1.0f, 0}, {0.5f, 2, 20}, {120, 130, 150, 255});
-        DrawCube({10.0f, 1.0f, 0}, {0.5f, 2, 20}, {120, 130, 150, 255});
 
-        // Physics test objects.
-        DrawCube({-3, 1, -2}, {2, 2, 2}, {220, 120, 80, 255});
+        DrawCube({0, 1, -10}, {20, 2, 0.4f}, {110, 120, 145, 255});
+        DrawCube({0, 1, 10}, {20, 2, 0.4f}, {110, 120, 145, 255});
+        DrawCube({-10, 1, 0}, {0.4f, 2, 20}, {110, 120, 145, 255});
+        DrawCube({10, 1, 0}, {0.4f, 2, 20}, {110, 120, 145, 255});
+
+        DrawCube({-3, 1, -2}, {2, 2, 2}, {220, 110, 70, 255});
         DrawCubeWires({-3, 1, -2}, {2, 2, 2}, WHITE);
-        DrawSphere(player.position, player.radius, {80, 180, 255, 255});
-        DrawSphereWires(player.position, player.radius, 16, 16, WHITE);
+        DrawCube({3, 0.75f, 2}, {1.5f, 1.5f, 1.5f}, {80, 190, 110, 255});
+        DrawCubeWires({3, 0.75f, 2}, {1.5f, 1.5f, 1.5f}, WHITE);
+
+        DrawCube(player.position, Vector3Scale(player.halfExtents, 2), {70, 165, 255, 255});
+        DrawCubeWires(player.position, Vector3Scale(player.halfExtents, 2), WHITE);
 
         EndMode3D();
 
-        DrawText("C++ 3D PHYSICS ENGINE", 20, 20, 28, RAYWHITE);
-        DrawText("WASD: Move   SPACE: Jump   Mouse: Look", 20, 58, 20, LIGHTGRAY);
-        DrawText(TextFormat("Velocity: %.2f, %.2f, %.2f", player.velocity.x, player.velocity.y, player.velocity.z),
-                 20, 88, 18, LIGHTGRAY);
-        DrawText("Gravity + ground collision + arena bounds", 20, 116, 18, LIGHTGRAY);
+        DrawText("3D PHYSICS ENGINE", 20, 18, 30, RAYWHITE);
+        DrawText("WASD: Move   SPACE: Jump   Mouse: Look", 20, 55, 20, LIGHTGRAY);
+        DrawText(TextFormat("Position: %.2f %.2f %.2f", player.position.x, player.position.y, player.position.z), 20, 88, 18, LIGHTGRAY);
+        DrawText(TextFormat("Velocity: %.2f %.2f %.2f", player.velocity.x, player.velocity.y, player.velocity.z), 20, 114, 18, LIGHTGRAY);
+        DrawText(player.grounded ? "Grounded" : "Airborne", 20, 140, 18, player.grounded ? GREEN : ORANGE);
         EndDrawing();
     }
 
