@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D Physics Engine</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#111;color:white;font-family:Arial,sans-serif}#game{width:100%;height:100%;display:block}#ui{position:fixed;left:18px;top:16px;padding:14px 18px;background:#0009;border:1px solid #ffffff33;border-radius:12px;backdrop-filter:blur(5px);pointer-events:none}h1{font-size:22px;margin:0 0 8px}.small{font-size:14px;color:#ddd;line-height:1.6}#start{position:fixed;inset:0;display:grid;place-items:center;background:#0008;z-index:5}#start button{font-size:22px;padding:16px 28px;border:0;border-radius:12px;cursor:pointer}#cross{position:fixed;left:50%;top:50%;width:8px;height:8px;margin:-4px;border:2px solid white;border-radius:50%;z-index:2;pointer-events:none}</style>
+</head>
+<body>
+<canvas id="game"></canvas><div id="cross"></div>
+<div id="ui"><h1>3D PHYSICS ENGINE</h1><div class="small">WASD = 이동 · SPACE = 점프 · 마우스 = 시점<br>중력 · 충돌 · 가속/감속 · 바닥 물리</div><div id="stats" class="small"></div></div>
+<div id="start"><button id="play">▶ 게임 시작</button></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js';
+const canvas=document.querySelector('#game'),scene=new THREE.Scene();
+scene.background=new THREE.Color(0x111722);scene.fog=new THREE.Fog(0x111722,20,55);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.05,100);camera.position.set(0,3,7);
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;
+scene.add(new THREE.HemisphereLight(0xbfd8ff,0x303030,2));const sun=new THREE.DirectionalLight(0xffffff,2.5);sun.position.set(8,14,6);sun.castShadow=true;scene.add(sun);
+const floor=new THREE.Mesh(new THREE.BoxGeometry(20,.4,20),new THREE.MeshStandardMaterial({color:0x3d4654,roughness:.9}));floor.position.y=-.2;floor.receiveShadow=true;scene.add(floor);
+const grid=new THREE.GridHelper(20,20,0x8993a5,0x596273);scene.add(grid);
+function box(x,y,z,sx,sy,sz,color){const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),new THREE.MeshStandardMaterial({color}));m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;scene.add(m);return m}
+box(-3,1,-2,2,2,2,0xd66b4d);box(3,.75,2,1.5,1.5,1.5,0x55bd78);box(0,1,-7,20,2,.4,0x69768d);box(0,1,7,20,2,.4,0x69768d);box(-7,1,0,.4,2,14,0x69768d);box(7,1,0,.4,2,14,0x69768d);
+const player=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0x4da3ff,roughness:.45}));player.position.set(0,2,0);player.castShadow=true;scene.add(player);
+const vel=new THREE.Vector3(),keys={};let grounded=false,yaw=0,pitch=-.15,locked=false;
+addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','KeyW','KeyA','KeyS','KeyD'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys[e.code]=false);
+document.querySelector('#play').onclick=()=>{document.body.requestPointerLock();document.querySelector('#start').style.display='none'};
+document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===document.body);
+document.addEventListener('mousemove',e=>{if(!locked)return;yaw-=e.movementX*.0025;pitch-=e.movementY*.0025;pitch=Math.max(-1.2,Math.min(1.2,pitch))});
+const clock=new THREE.Clock();
+function update(dt){
+ const forward=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw)),right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));let input=new THREE.Vector3();
+ if(keys.KeyW)input.add(forward);if(keys.KeyS)input.sub(forward);if(keys.KeyD)input.add(right);if(keys.KeyA)input.sub(right);if(input.lengthSq())input.normalize();
+ const targetX=input.x*7,targetZ=input.z*7,accel=Math.min(30*dt,1);vel.x+=(targetX-vel.x)*accel;vel.z+=(targetZ-vel.z)*accel;
+ if(keys.Space&&grounded){vel.y=8;grounded=false}vel.y-=20*dt;player.position.addScaledVector(vel,dt);
+ if(player.position.y<.5){player.position.y=.5;if(vel.y<0)vel.y=0;grounded=true}else grounded=false;
+ player.position.x=Math.max(-6.5,Math.min(6.5,player.position.x));player.position.z=Math.max(-6.5,Math.min(6.5,player.position.z));
+ const camDist=6,cp=Math.cos(pitch),sp=Math.sin(pitch);const dir=new THREE.Vector3(-Math.sin(yaw)*cp,sp,-Math.cos(yaw)*cp);camera.position.copy(player.position).addScaledVector(dir,-camDist);camera.position.y+=1.8;camera.lookAt(player.position.x,player.position.y+.35,player.position.z);
+ document.querySelector('#stats').textContent=`속도: ${vel.length().toFixed(2)} m/s · ${grounded?'바닥':'공중'}`;
+}
+function loop(){requestAnimationFrame(loop);const dt=Math.min(clock.getDelta(),.033);update(dt);renderer.render(scene,camera)}loop();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+</script></body></html>
